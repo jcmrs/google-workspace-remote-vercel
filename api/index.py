@@ -10,6 +10,26 @@ class handler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         
+        # OAuth authorize endpoint
+        if path == '/authorize':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            html_response = '''
+            <html>
+            <body>
+                <h1>OAuth Authorization</h1>
+                <p>This is where Google OAuth would happen</p>
+                <p>Endpoint is working - ready for OAuth implementation</p>
+            </body>
+            </html>
+            '''
+            
+            self.wfile.write(html_response.encode())
+            return
+        
         # OAuth Authorization Server metadata endpoint
         if path == '/.well-known/oauth-authorization-server':
             self.send_response(200)
@@ -168,6 +188,25 @@ class handler(BaseHTTPRequestHandler):
             pass  # Connection closed
     
     def do_POST(self):
+        # Parse the path
+        parsed_path = urllib.parse.urlparse(self.path)
+        path = parsed_path.path
+        
+        # OAuth token endpoint
+        if path == '/token':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {
+                "error": "not_implemented",
+                "error_description": "Token endpoint exists but OAuth flow not yet implemented"
+            }
+            
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
         # Handle MCP protocol messages via POST (keep existing functionality)
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length).decode('utf-8')
