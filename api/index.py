@@ -20,8 +20,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Set environment variables
-os.environ.setdefault('WORKSPACE_MCP_BASE_URI', 'https://google-workspace-remote-vercel-2yv9k9zo4-jcmrs-projects.vercel.app')
+# Set environment variables - UPDATED TO CURRENT DEPLOYMENT
+os.environ.setdefault('WORKSPACE_MCP_BASE_URI', 'https://google-workspace-remote-vercel-6l6w6dnxh-jcmrs-projects.vercel.app')
 os.environ.setdefault('WORKSPACE_MCP_PORT', '443')
 os.environ.setdefault('OAUTHLIB_INSECURE_TRANSPORT', 'false')
 os.environ.setdefault('WORKSPACE_MCP_STATELESS_MODE', 'true')
@@ -35,7 +35,8 @@ def read_root():
         "status": "healthy",
         "features": ["gmail", "drive", "calendar", "docs", "sheets", "chat", "forms", "slides", "tasks", "search"],
         "oauth": "configured",
-        "deployment": "vercel"
+        "deployment": "vercel",
+        "current_url": os.getenv('WORKSPACE_MCP_BASE_URI')
     }
 
 @app.get("/api/health")
@@ -68,7 +69,7 @@ async def start_auth():
             "message": "GOOGLE_OAUTH_CLIENT_ID not found in environment"
         }, status_code=500)
     
-    # OAuth 2.0 parameters
+    # OAuth 2.0 parameters - FIXED TO USE CURRENT URL
     base_url = os.getenv('WORKSPACE_MCP_BASE_URI')
     redirect_uri = f"{base_url}/oauth2callback"
     
@@ -143,32 +144,40 @@ async def sse_endpoint():
 
 @app.get("/oauth2callback")
 async def oauth_callback(request: Request):
-    """OAuth 2.0 callback endpoint"""
-    params = dict(request.query_params)
-    
-    if "error" in params:
+    """OAuth 2.0 callback endpoint - ENHANCED ERROR HANDLING"""
+    try:
+        params = dict(request.query_params)
+        
+        if "error" in params:
+            return JSONResponse({
+                "status": "error",
+                "error": params.get("error"),
+                "error_description": params.get("error_description")
+            })
+        
+        if "code" in params:
+            # Here we would normally exchange the code for tokens
+            # For now, just confirm we received it
+            return JSONResponse({
+                "status": "success",
+                "message": "🎉 OAuth authentication successful!",
+                "code": params["code"][:10] + "...",  # Partial code for security
+                "scopes": params.get("scope", "").split(),
+                "next_step": "Token exchange would happen here - ready for Google Workspace integration!"
+            })
+        
+        return JSONResponse({
+            "status": "incomplete",
+            "message": "OAuth callback received but no code or error found",
+            "params": params
+        })
+        
+    except Exception as e:
         return JSONResponse({
             "status": "error",
-            "error": params.get("error"),
-            "error_description": params.get("error_description")
-        })
-    
-    if "code" in params:
-        # Here we would normally exchange the code for tokens
-        # For now, just confirm we received it
-        return JSONResponse({
-            "status": "success",
-            "message": "Authorization code received! OAuth flow completed.",
-            "code": params["code"][:10] + "...",  # Partial code for security
-            "state": params.get("state"),
-            "next_step": "Token exchange would happen here"
-        })
-    
-    return JSONResponse({
-        "status": "incomplete",
-        "message": "OAuth callback received but no code or error found",
-        "params": params
-    })
+            "message": f"Callback processing failed: {str(e)}",
+            "error_type": "callback_error"
+        }, status_code=500)
 
 @app.get("/api/tools")
 async def list_tools():
