@@ -1,17 +1,15 @@
-from http.server import BaseHTTPRequestHandler
-import json
+from fastapi import FastAPI
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        
-        response = {
-            "message": "Hello from Vercel Python!",
-            "status": "working",
-            "path": self.path
-        }
-        
-        self.wfile.write(json.dumps(response).encode())
-        return
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Hello World from FastAPI on Vercel!", "status": "working"}
+
+@app.get("/api/health")
+def health_check():
+    return {"status": "healthy", "service": "google-workspace-remote-vercel"}
+
+@app.get("/api/test")
+def test_endpoint():
+    return {"test": "success", "deployment": "vercel", "framework": "fastapi"}
