@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
+import urllib.parse
 
 app = FastAPI(
     title="Google Workspace Remote MCP Server",
@@ -20,7 +21,7 @@ app.add_middleware(
 )
 
 # Set environment variables
-os.environ.setdefault('WORKSPACE_MCP_BASE_URI', 'https://google-workspace-remote-vercel-5m5c5011z-jcmrs-projects.vercel.app')
+os.environ.setdefault('WORKSPACE_MCP_BASE_URI', 'https://google-workspace-remote-vercel-2yv9k9zo4-jcmrs-projects.vercel.app')
 os.environ.setdefault('WORKSPACE_MCP_PORT', '443')
 os.environ.setdefault('OAUTHLIB_INSECURE_TRANSPORT', 'false')
 os.environ.setdefault('WORKSPACE_MCP_STATELESS_MODE', 'true')
@@ -55,6 +56,45 @@ def health_check():
 def test_endpoint():
     return {"test": "success", "deployment": "vercel", "framework": "fastapi"}
 
+@app.get("/auth")
+async def start_auth():
+    """Start OAuth authentication flow"""
+    
+    # Get OAuth credentials from environment
+    client_id = os.getenv('GOOGLE_OAUTH_CLIENT_ID')
+    if not client_id:
+        return JSONResponse({
+            "error": "OAuth not configured",
+            "message": "GOOGLE_OAUTH_CLIENT_ID not found in environment"
+        }, status_code=500)
+    
+    # OAuth 2.0 parameters
+    base_url = os.getenv('WORKSPACE_MCP_BASE_URI')
+    redirect_uri = f"{base_url}/oauth2callback"
+    
+    scopes = [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/spreadsheets"
+    ]
+    
+    # Build OAuth URL
+    auth_params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "scope": " ".join(scopes),
+        "response_type": "code",
+        "access_type": "offline",
+        "prompt": "consent"
+    }
+    
+    auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(auth_params)
+    
+    return RedirectResponse(url=auth_url)
+
 @app.get("/sse")
 async def sse_endpoint():
     """MCP Server-Sent Events endpoint for Claude integration"""
@@ -81,7 +121,8 @@ async def sse_endpoint():
                 "search": True,
                 "color_coding": True
             },
-            "oauth_status": "configured"
+            "oauth_status": "configured",
+            "auth_url": f"{os.getenv('WORKSPACE_MCP_BASE_URI')}/auth"
         }
         yield f"event: server_info\ndata: {json.dumps(server_info)}\n\n"
         
@@ -113,11 +154,14 @@ async def oauth_callback(request: Request):
         })
     
     if "code" in params:
+        # Here we would normally exchange the code for tokens
+        # For now, just confirm we received it
         return JSONResponse({
             "status": "success",
-            "message": "Authorization code received",
+            "message": "Authorization code received! OAuth flow completed.",
             "code": params["code"][:10] + "...",  # Partial code for security
-            "state": params.get("state")
+            "state": params.get("state"),
+            "next_step": "Token exchange would happen here"
         })
     
     return JSONResponse({
