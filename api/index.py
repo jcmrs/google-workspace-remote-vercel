@@ -10,6 +10,25 @@ class handler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         
+        # OAuth Protected Resource metadata endpoint (following Vercel pattern)
+        if path == '/.well-known/oauth-protected-resource':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {
+                "authorization_servers": [
+                    "https://google-workspace-remote-vercel.vercel.app"
+                ]
+            }
+            
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
+        # Debug: Log the path to see what's being requested
+        print(f"DEBUG: Requested path: '{path}'")
+        
         # SSE endpoint for MCP remote connection
         if path == '/sse':
             self.handle_sse()
