@@ -1,84 +1,232 @@
 """
-Vercel serverless function entry point for Google Workspace MCP Server
-Uses the original FastMCP implementation with proper MCP protocol support
+Minimal MCP server implementation for Vercel
+Based on the MCP protocol specification
 """
+import json
+import asyncio
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import os
-import sys
 import logging
-from pathlib import Path
 
-# Add the project root to Python path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-# Configure logging for Vercel
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set environment variables for Vercel deployment
-os.environ.setdefault('WORKSPACE_MCP_BASE_URI', 'https://google-workspace-remote-vercel.vercel.app')
-os.environ.setdefault('WORKSPACE_MCP_PORT', '443')
-os.environ.setdefault('OAUTHLIB_INSECURE_TRANSPORT', 'false')
-os.environ.setdefault('WORKSPACE_MCP_STATELESS_MODE', 'true')
-os.environ.setdefault('MCP_ENABLE_OAUTH21', 'true')
+app = FastAPI(title="Google Workspace MCP Server")
 
-try:
-    # Import the original MCP server components
-    from auth.oauth_config import reload_oauth_config
-    from core.server import server, set_transport_mode, configure_server_for_http
-    from core.tool_registry import set_enabled_tools as set_enabled_tool_names, wrap_server_tool_method, filter_server_tools
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Environment variables
+os.environ.setdefault('WORKSPACE_MCP_BASE_URI', 'https://google-workspace-remote-vercel.vercel.app')
+
+@app.get("/")
+def root():
+    return {
+        "service": "Google Workspace MCP Server",
+        "version": "1.0.0",
+        "status": "minimal_mcp_implementation",
+        "protocol": "MCP",
+        "transport": "streamable-http"
+    }
+
+@app.get("/health")
+def health():
+    return {"status": "healthy", "implementation": "minimal_mcp"}
+
+# MCP Protocol Implementation
+@app.post("/")
+async def mcp_handler(request: Request):
+    """Handle MCP protocol messages"""
+    try:
+        data = await request.json()
+        
+        # MCP Initialize handshake
+        if data.get("method") == "initialize":
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {},
+                        "resources": {}
+                    },
+                    "serverInfo": {
+                        "name": "google-workspace-mcp-server",
+                        "version": "1.0.0"
+                    }
+                }
+            })
+        
+        # Tools list
+        elif data.get("method") == "tools/list":
+            tools = [
+                {
+                    "name": "gmail_search",
+                    "description": "Search Gmail messages",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string", "description": "Search query"}
+                        },
+                        "required": ["query"]
+                    }
+                },
+                {
+                    "name": "calendar_create_event",
+                    "description": "Create a calendar event",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string", "description": "Event title"},
+                            "start_time": {"type": "string", "description": "Start time"},
+                            "end_time": {"type": "string", "description": "End time"}
+                        },
+                        "required": ["title", "start_time", "end_time"]
+                    }
+                },
+                {
+                    "name": "drive_list_files",
+                    "description": "List Google Drive files",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "folder_id": {"type": "string", "description": "Folder ID to search in"}
+                        }
+                    }
+                }
+            ]
+            
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {"tools": tools}
+            })
+        
+        # Tool call handler
+        elif data.get("method") == "tools/call":
+            tool_name = data.get("params", {}).get("name")
+            arguments = data.get("params", {}).get("arguments", {})
+            
+            # Mock tool responses for testing
+            if tool_name == "gmail_search":
+                result = {
+                    "content": [
+                        {
+                            "type": "text", 
+                            "text": f"Gmail search for '{arguments.get('query', '')}' - Authentication required"
+                        }
+                    ]
+                }
+            elif tool_name == "calendar_create_event":
+                result = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Calendar event '{arguments.get('title', '')}' would be created - Authentication required"
+                        }
+                    ]
+                }
+            elif tool_name == "drive_list_files":
+                result = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Drive files would be listed - Authentication required"
+                        }
+                    ]
+                }
+            else:
+                result = {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Unknown tool: {tool_name}"
+                        }
+                    ]
+                }
+            
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": result
+            })
+        
+        # Notifications/initialized
+        elif data.get("method") == "notifications/initialized":
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "result": {}
+            })
+        
+        # Default response
+        else:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "id": data.get("id"),
+                "error": {
+                    "code": -32601,
+                    "message": f"Method not found: {data.get('method')}"
+                }
+            })
     
-    # Reload OAuth config with Vercel environment
-    reload_oauth_config()
+    except Exception as e:
+        logger.error(f"MCP handler error: {e}")
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "id": data.get("id") if "data" in locals() else None,
+            "error": {
+                "code": -32603,
+                "message": f"Internal error: {str(e)}"
+            }
+        })
+
+# SSE endpoint for MCP Inspector compatibility
+@app.get("/sse")
+async def sse_endpoint():
+    """Server-Sent Events endpoint for MCP"""
     
-    # Import all tool modules to register them
-    import gmail.gmail_tools
-    import gdrive.drive_tools
-    import gcalendar.calendar_tools
-    import gdocs.docs_tools
-    import gsheets.sheets_tools
-    import gchat.chat_tools
-    import gforms.forms_tools
-    import gslides.slides_tools
-    import gtasks.tasks_tools
-    import gsearch.search_tools
-    
-    logger.info("All tool modules imported successfully")
-    
-    # Configure server for HTTP transport
-    set_transport_mode('streamable-http')
-    configure_server_for_http()
-    wrap_server_tool_method(server)
-    
-    # Set enabled tools (all tools by default)
-    from auth.scopes import set_enabled_tools
-    set_enabled_tools(['gmail', 'drive', 'calendar', 'docs', 'sheets', 'chat', 'forms', 'slides', 'tasks', 'search'])
-    
-    # Create the FastAPI app using the original server
-    app = server.create_fastapi_app()
-    
-    logger.info("Google Workspace MCP Server initialized for Vercel with FastMCP")
-    
-except Exception as e:
-    logger.error(f"Failed to initialize MCP server: {e}")
-    # Fallback to basic FastAPI for debugging
-    from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
-    
-    app = FastAPI(title="Google Workspace MCP Server - Fallback Mode")
-    
-    @app.get("/")
-    def fallback_root():
-        return {
-            "service": "Google Workspace MCP Server",
-            "status": "fallback_mode",
-            "error": str(e),
-            "message": "MCP server failed to initialize, running in fallback mode"
+    async def event_stream():
+        # Send initial message
+        yield f"data: {json.dumps({'type': 'connection', 'status': 'connected'})}\n\n"
+        
+        # Send server capabilities
+        capabilities = {
+            "type": "server_info",
+            "name": "google-workspace-mcp-server",
+            "version": "1.0.0",
+            "capabilities": {
+                "tools": True,
+                "resources": False
+            }
         }
+        yield f"data: {json.dumps(capabilities)}\n\n"
+        
+        # Keep connection alive
+        while True:
+            await asyncio.sleep(30)
+            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
     
-    @app.get("/health")
-    def fallback_health():
-        return {"status": "fallback", "error": str(e)}
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+        }
+    )
 
 # Export for Vercel
 handler = app
+
+logger.info("Minimal Google Workspace MCP Server initialized for Vercel")
