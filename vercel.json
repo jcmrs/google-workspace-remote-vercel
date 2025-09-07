@@ -1,0 +1,44 @@
+{
+  "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/sse",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/oauth2callback",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "api/index.py"
+    }
+  ],
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 30
+    }
+  },
+  "excludeFiles": [
+    "**/*.pyc",
+    "**/__pycache__/**",
+    ".env",
+    ".git/**",
+    ".venv/**",
+    ".ruff_cache/**",
+    "workspace_mcp.egg-info/**",
+    "Dockerfile",
+    "docker-compose.yml",
+    "helm-chart/**",
+    "mcp_server_debug.log",
+    "manifest.json",
+    "smithery.yaml",
+    "uv.lock",
+    "changes_since_120.txt"
+  ]
+}
