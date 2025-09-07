@@ -64,3 +64,4 @@ changes_since_120.txt
 smithery.yaml
 uv.lock
 manifest.json
+.vercel

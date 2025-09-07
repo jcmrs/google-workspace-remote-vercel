@@ -3,6 +3,8 @@ import json
 import os
 import urllib.parse
 import time
+import threading
+import queue
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -49,9 +51,8 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
             return
         
-        # OAuth Protected Resource metadata endpoint (following Vercel pattern)
-        # Handle both encoded and unencoded versions of the path
-        if path == '/.well-known/oauth-protected-resource' or path == '/.well-known/oauth-protected-resource':
+        # OAuth Protected Resource metadata endpoint
+        if path == '/.well-known/oauth-protected-resource':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -65,31 +66,10 @@ class handler(BaseHTTPRequestHandler):
             
             self.wfile.write(json.dumps(response).encode())
             return
-        
-        # Test: catch all .well-known requests to debug
-        if '.well-known' in path:
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            
-            response = {
-                "debug": "well-known endpoint hit",
-                "requested_path": path,
-                "authorization_servers": [
-                    "https://google-workspace-remote-vercel.vercel.app"
-                ]
-            }
-            
-            self.wfile.write(json.dumps(response).encode())
-            return
-        
-        # Debug: Log the path to see what's being requested
-        print(f"DEBUG: Requested path: '{path}'")
         
         # SSE endpoint for MCP remote connection
         if path == '/sse':
-            self.handle_sse()
+            self.handle_sse_mcp()
             return
         
         # Default GET response
@@ -105,87 +85,120 @@ class handler(BaseHTTPRequestHandler):
             "protocol": "MCP",
             "endpoint": self.path,
             "transports": ["POST", "SSE"],
-            "message": "Vercel Python handler working correctly"
+            "features": [
+                "Gmail", "Calendar", "Drive", "Docs", "Sheets", 
+                "Slides", "Forms", "Chat", "Tasks", "Search"
+            ],
+            "message": "Vercel deployment ready for MCP connections"
         }
         
         self.wfile.write(json.dumps(response).encode())
         return
     
-    def handle_sse(self):
-        """Handle Server-Sent Events for MCP protocol"""
+    def handle_sse_mcp(self):
+        """Handle Server-Sent Events with proper MCP protocol handshake"""
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         
-        # Send initial MCP server info
-        server_info = {
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {}
-                },
-                "serverInfo": {
-                    "name": "google-workspace-mcp-server",
-                    "version": "1.0.0"
+        # MCP SSE State
+        initialized = False
+        
+        try:
+            # Send connection established event
+            connection_event = {
+                "type": "connection",
+                "status": "established",
+                "protocol": "MCP",
+                "version": "2024-11-05"
+            }
+            self.wfile.write(f"event: connection\ndata: {json.dumps(connection_event)}\n\n".encode())
+            self.wfile.flush()
+            
+            # Wait for client to send initialize message
+            # In SSE, client would typically send initialize via separate HTTP POST
+            # For demo purposes, we'll send a ready signal and wait briefly
+            
+            time.sleep(1)  # Brief wait for any immediate client messages
+            
+            # Send server info (this indicates server is ready for initialization)
+            server_info = {
+                "jsonrpc": "2.0",
+                "method": "notifications/message",
+                "params": {
+                    "level": "info",
+                    "logger": "mcp-server",
+                    "data": {
+                        "message": "Google Workspace MCP Server ready for initialization",
+                        "protocol_version": "2024-11-05",
+                        "server_name": "google-workspace-mcp-server",
+                        "server_version": "1.0.0",
+                        "capabilities": ["tools", "resources", "prompts"],
+                        "authentication": "oauth2",
+                        "status": "ready"
+                    }
                 }
             }
-        }
-        
-        # Send as SSE event
-        self.wfile.write(f"data: {json.dumps(server_info)}\n\n".encode())
-        self.wfile.flush()
-        
-        # Send tools list
-        tools_data = {
-            "jsonrpc": "2.0", 
-            "method": "tools/list",
-            "params": {
-                "tools": [
-                    {
-                        "name": "gmail_search",
-                        "description": "Search Gmail messages",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "query": {"type": "string", "description": "Search query"}
-                            },
-                            "required": ["query"]
-                        }
-                    },
-                    {
-                        "name": "calendar_create_event",
-                        "description": "Create a calendar event",
-                        "inputSchema": {
-                            "type": "object",
-                            "properties": {
-                                "title": {"type": "string", "description": "Event title"},
-                                "start_time": {"type": "string", "description": "Start time"},
-                                "end_time": {"type": "string", "description": "End time"}
-                            },
-                            "required": ["title", "start_time", "end_time"]
-                        }
+            
+            self.wfile.write(f"event: server_info\ndata: {json.dumps(server_info)}\n\n".encode())
+            self.wfile.flush()
+            
+            # Send available tools information (not as tools/list response, but as capability announcement)
+            tools_announcement = {
+                "jsonrpc": "2.0",
+                "method": "notifications/message", 
+                "params": {
+                    "level": "info",
+                    "logger": "mcp-server",
+                    "data": {
+                        "message": "Google Workspace tools available",
+                        "tool_count": 10,
+                        "tools": [
+                            "gmail_search", "gmail_send", "calendar_create_event", 
+                            "calendar_list_events", "drive_search", "drive_read",
+                            "docs_create", "sheets_read", "slides_create", "tasks_list"
+                        ],
+                        "authentication_required": True,
+                        "oauth_flow": "ready"
                     }
-                ]
+                }
             }
-        }
-        
-        self.wfile.write(f"data: {json.dumps(tools_data)}\n\n".encode())
-        self.wfile.flush()
-        
-        # Keep connection alive (basic implementation)
-        try:
-            for i in range(3):  # Send a few heartbeats then close (Vercel timeout)
+            
+            self.wfile.write(f"event: capabilities\ndata: {json.dumps(tools_announcement)}\n\n".encode())
+            self.wfile.flush()
+            
+            # Keep connection alive with periodic heartbeats
+            heartbeat_count = 0
+            while heartbeat_count < 30:  # Max 5 minutes (30 * 10s)
                 time.sleep(10)
-                heartbeat = {"jsonrpc": "2.0", "method": "heartbeat", "params": {"timestamp": int(time.time())}}
-                self.wfile.write(f"data: {json.dumps(heartbeat)}\n\n".encode())
+                heartbeat_count += 1
+                
+                heartbeat = {
+                    "type": "heartbeat",
+                    "timestamp": int(time.time()),
+                    "sequence": heartbeat_count,
+                    "status": "active"
+                }
+                
+                self.wfile.write(f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n".encode())
                 self.wfile.flush()
-        except:
-            pass  # Connection closed
+                
+        except Exception as e:
+            # Connection closed or error occurred
+            error_event = {
+                "type": "error", 
+                "message": f"SSE connection error: {str(e)}",
+                "timestamp": int(time.time())
+            }
+            try:
+                self.wfile.write(f"event: error\ndata: {json.dumps(error_event)}\n\n".encode())
+                self.wfile.flush()
+            except:
+                pass  # Connection already closed
     
     def do_POST(self):
         # Parse the path
@@ -207,7 +220,7 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
             return
         
-        # Handle MCP protocol messages via POST (keep existing functionality)
+        # Handle MCP protocol messages via POST
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length).decode('utf-8')
         
@@ -223,7 +236,8 @@ class handler(BaseHTTPRequestHandler):
                         "protocolVersion": "2024-11-05",
                         "capabilities": {
                             "tools": {},
-                            "resources": {}
+                            "resources": {},
+                            "prompts": {}
                         },
                         "serverInfo": {
                             "name": "google-workspace-mcp-server",
@@ -232,7 +246,7 @@ class handler(BaseHTTPRequestHandler):
                     }
                 }
             
-            # Tools list
+            # Tools list request
             elif data.get("method") == "tools/list":
                 tools = [
                     {
@@ -241,22 +255,118 @@ class handler(BaseHTTPRequestHandler):
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "query": {"type": "string", "description": "Search query"}
+                                "query": {"type": "string", "description": "Search query"},
+                                "max_results": {"type": "integer", "description": "Maximum results", "default": 10}
                             },
                             "required": ["query"]
                         }
                     },
                     {
+                        "name": "gmail_send",
+                        "description": "Send an email via Gmail",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "to": {"type": "string", "description": "Recipient email"},
+                                "subject": {"type": "string", "description": "Email subject"},
+                                "body": {"type": "string", "description": "Email body"}
+                            },
+                            "required": ["to", "subject", "body"]
+                        }
+                    },
+                    {
                         "name": "calendar_create_event", 
-                        "description": "Create a calendar event",
+                        "description": "Create a calendar event with color support",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
                                 "title": {"type": "string", "description": "Event title"},
-                                "start_time": {"type": "string", "description": "Start time"},
-                                "end_time": {"type": "string", "description": "End time"}
+                                "start_time": {"type": "string", "description": "Start time (ISO format)"},
+                                "end_time": {"type": "string", "description": "End time (ISO format)"},
+                                "description": {"type": "string", "description": "Event description"},
+                                "color_id": {"type": "integer", "description": "Calendar color ID (1-11)"}
                             },
                             "required": ["title", "start_time", "end_time"]
+                        }
+                    },
+                    {
+                        "name": "calendar_list_events",
+                        "description": "List calendar events",
+                        "inputSchema": {
+                            "type": "object", 
+                            "properties": {
+                                "start_date": {"type": "string", "description": "Start date (ISO format)"},
+                                "end_date": {"type": "string", "description": "End date (ISO format)"},
+                                "max_results": {"type": "integer", "description": "Maximum results", "default": 25}
+                            }
+                        }
+                    },
+                    {
+                        "name": "drive_search",
+                        "description": "Search Google Drive files",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "query": {"type": "string", "description": "Search query"},
+                                "file_type": {"type": "string", "description": "File type filter"}
+                            },
+                            "required": ["query"]
+                        }
+                    },
+                    {
+                        "name": "drive_read_file",
+                        "description": "Read content from Google Drive file",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "file_id": {"type": "string", "description": "Google Drive file ID"}
+                            },
+                            "required": ["file_id"]
+                        }
+                    },
+                    {
+                        "name": "docs_create",
+                        "description": "Create a new Google Doc",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "Document title"},
+                                "content": {"type": "string", "description": "Initial content"}
+                            },
+                            "required": ["title"]
+                        }
+                    },
+                    {
+                        "name": "sheets_read",
+                        "description": "Read data from Google Sheets",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "spreadsheet_id": {"type": "string", "description": "Spreadsheet ID"},
+                                "range": {"type": "string", "description": "Range to read (e.g., A1:Z100)"}
+                            },
+                            "required": ["spreadsheet_id"]
+                        }
+                    },
+                    {
+                        "name": "slides_create",
+                        "description": "Create a new Google Slides presentation",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string", "description": "Presentation title"}
+                            },
+                            "required": ["title"]
+                        }
+                    },
+                    {
+                        "name": "tasks_list",
+                        "description": "List Google Tasks",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "task_list": {"type": "string", "description": "Task list name"}
+                            }
                         }
                     }
                 ]
@@ -265,6 +375,24 @@ class handler(BaseHTTPRequestHandler):
                     "jsonrpc": "2.0",
                     "id": data.get("id"),
                     "result": {"tools": tools}
+                }
+                
+            # Tool execution (placeholder - would need actual Google API implementation)
+            elif data.get("method") == "tools/call":
+                tool_name = data.get("params", {}).get("name")
+                tool_args = data.get("params", {}).get("arguments", {})
+                
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": data.get("id"),
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Tool '{tool_name}' called with args: {tool_args}. OAuth authentication required to execute Google Workspace operations."
+                            }
+                        ]
+                    }
                 }
             
             # Default response for unknown methods
@@ -301,6 +429,6 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.end_headers()
         return
