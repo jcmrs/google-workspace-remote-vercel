@@ -18,22 +18,5 @@
       "src": "/(.*)",
       "dest": "api/index.py"
     }
-  ],
-  "excludeFiles": [
-    "**/*.pyc",
-    "**/__pycache__/**",
-    ".env",
-    ".git/**",
-    ".venv/**",
-    ".ruff_cache/**",
-    "workspace_mcp.egg-info/**",
-    "Dockerfile",
-    "docker-compose.yml",
-    "helm-chart/**",
-    "mcp_server_debug.log",
-    "manifest.json",
-    "smithery.yaml",
-    "uv.lock",
-    "changes_since_120.txt"
   ]
 }
