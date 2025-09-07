@@ -1,17 +1,9 @@
 """
-Minimal FastAPI app for testing Vercel deployment
+Absolute minimal test for Vercel
 """
-from fastapi import FastAPI
-
-app = FastAPI()
-
-@app.get("/")
-def read_root():
-    return {"message": "Hello from Vercel!", "status": "working"}
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "service": "minimal-test"}
-
-# Export for Vercel
-handler = app
+def handler(request):
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/json"},
+        "body": '{"message": "Hello Vercel", "test": "success"}'
+    }
