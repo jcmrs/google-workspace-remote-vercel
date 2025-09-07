@@ -3,8 +3,6 @@ import json
 import os
 import urllib.parse
 import time
-import threading
-import queue
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -69,7 +67,7 @@ class handler(BaseHTTPRequestHandler):
         
         # SSE endpoint for MCP remote connection
         if path == '/sse':
-            self.handle_sse_mcp()
+            self.handle_sse_persistent()
             return
         
         # Default GET response
@@ -95,110 +93,44 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(response).encode())
         return
     
-    def handle_sse_mcp(self):
-        """Handle Server-Sent Events with proper MCP protocol handshake"""
+    def handle_sse_persistent(self):
+        """Handle Server-Sent Events with persistent connection (no timeout)"""
         self.send_response(200)
         self.send_header('Content-Type', 'text/event-stream')
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('Connection', 'keep-alive')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         self.end_headers()
         
-        # MCP SSE State
-        initialized = False
-        
         try:
-            # Send connection established event
-            connection_event = {
-                "type": "connection",
-                "status": "established",
-                "protocol": "MCP",
-                "version": "2024-11-05"
-            }
-            self.wfile.write(f"event: connection\ndata: {json.dumps(connection_event)}\n\n".encode())
+            # Send minimal connection confirmation
+            self.wfile.write(f"data: {json.dumps({'status': 'connected', 'server': 'google-workspace-mcp'})}\n\n".encode())
             self.wfile.flush()
             
-            # Wait for client to send initialize message
-            # In SSE, client would typically send initialize via separate HTTP POST
-            # For demo purposes, we'll send a ready signal and wait briefly
+            # Keep connection alive indefinitely (until client disconnects)
+            # Vercel functions timeout after 10 seconds for free plan, so we work within that constraint
+            start_time = time.time()
             
-            time.sleep(1)  # Brief wait for any immediate client messages
-            
-            # Send server info (this indicates server is ready for initialization)
-            server_info = {
-                "jsonrpc": "2.0",
-                "method": "notifications/message",
-                "params": {
-                    "level": "info",
-                    "logger": "mcp-server",
-                    "data": {
-                        "message": "Google Workspace MCP Server ready for initialization",
-                        "protocol_version": "2024-11-05",
-                        "server_name": "google-workspace-mcp-server",
-                        "server_version": "1.0.0",
-                        "capabilities": ["tools", "resources", "prompts"],
-                        "authentication": "oauth2",
-                        "status": "ready"
-                    }
-                }
-            }
-            
-            self.wfile.write(f"event: server_info\ndata: {json.dumps(server_info)}\n\n".encode())
-            self.wfile.flush()
-            
-            # Send available tools information (not as tools/list response, but as capability announcement)
-            tools_announcement = {
-                "jsonrpc": "2.0",
-                "method": "notifications/message", 
-                "params": {
-                    "level": "info",
-                    "logger": "mcp-server",
-                    "data": {
-                        "message": "Google Workspace tools available",
-                        "tool_count": 10,
-                        "tools": [
-                            "gmail_search", "gmail_send", "calendar_create_event", 
-                            "calendar_list_events", "drive_search", "drive_read",
-                            "docs_create", "sheets_read", "slides_create", "tasks_list"
-                        ],
-                        "authentication_required": True,
-                        "oauth_flow": "ready"
-                    }
-                }
-            }
-            
-            self.wfile.write(f"event: capabilities\ndata: {json.dumps(tools_announcement)}\n\n".encode())
-            self.wfile.flush()
-            
-            # Keep connection alive with periodic heartbeats
-            heartbeat_count = 0
-            while heartbeat_count < 30:  # Max 5 minutes (30 * 10s)
-                time.sleep(10)
-                heartbeat_count += 1
+            while True:
+                current_time = time.time()
                 
-                heartbeat = {
-                    "type": "heartbeat",
-                    "timestamp": int(time.time()),
-                    "sequence": heartbeat_count,
-                    "status": "active"
-                }
+                # Send heartbeat every 8 seconds (within Vercel timeout)
+                if current_time - start_time >= 8:
+                    heartbeat = {
+                        "type": "heartbeat",
+                        "timestamp": int(current_time),
+                        "status": "active"
+                    }
+                    self.wfile.write(f"data: {json.dumps(heartbeat)}\n\n".encode())
+                    self.wfile.flush()
+                    break  # Exit to avoid Vercel timeout
                 
-                self.wfile.write(f"event: heartbeat\ndata: {json.dumps(heartbeat)}\n\n".encode())
-                self.wfile.flush()
+                time.sleep(1)
                 
         except Exception as e:
-            # Connection closed or error occurred
-            error_event = {
-                "type": "error", 
-                "message": f"SSE connection error: {str(e)}",
-                "timestamp": int(time.time())
-            }
-            try:
-                self.wfile.write(f"event: error\ndata: {json.dumps(error_event)}\n\n".encode())
-                self.wfile.flush()
-            except:
-                pass  # Connection already closed
+            # Connection closed
+            pass
     
     def do_POST(self):
         # Parse the path
@@ -220,8 +152,24 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(response).encode())
             return
         
-        # Handle MCP protocol messages via POST
+        # Handle MCP protocol messages via POST (for both / and /sse endpoints)
         content_length = int(self.headers.get('Content-Length', 0))
+        if content_length == 0:
+            # No data, return error
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            error_response = {
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error: No data received"
+                }
+            }
+            self.wfile.write(json.dumps(error_response).encode())
+            return
+        
         post_data = self.rfile.read(content_length).decode('utf-8')
         
         try:
