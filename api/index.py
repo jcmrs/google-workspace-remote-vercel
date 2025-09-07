@@ -10,6 +10,25 @@ class handler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         
+        # OAuth Authorization Server metadata endpoint
+        if path == '/.well-known/oauth-authorization-server':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {
+                "issuer": "https://google-workspace-remote-vercel.vercel.app",
+                "authorization_endpoint": "https://google-workspace-remote-vercel.vercel.app/authorize",
+                "token_endpoint": "https://google-workspace-remote-vercel.vercel.app/token",
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code"],
+                "code_challenge_methods_supported": ["S256"]
+            }
+            
+            self.wfile.write(json.dumps(response).encode())
+            return
+        
         # OAuth Protected Resource metadata endpoint (following Vercel pattern)
         # Handle both encoded and unencoded versions of the path
         if path == '/.well-known/oauth-protected-resource' or path == '/.well-known/oauth-protected-resource':
