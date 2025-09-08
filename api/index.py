@@ -26,10 +26,7 @@ class handler(BaseHTTPRequestHandler):
                     "configure": f"{base_url}/configure"
                 },
                 "transport": ["sse", "http"],
-                "oauth": {
-                    "authorization_url": f"{base_url}/authorize",
-                    "token_url": f"{base_url}/token"
-                },
+                "oauth": true,
                 "sse": True,
                 "icon_url": f"{base_url}/static/icon.png",
                 "documentation_url": "https://github.com/jcmrs/google-workspace-remote-vercel",
