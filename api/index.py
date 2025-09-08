@@ -34,7 +34,7 @@ class handler(BaseHTTPRequestHandler):
                 
                 base_url = "https://google-workspace-remote-vercel.vercel.app"
                 manifest = {
-                    "name": "Google Workspace MCP",
+                    "name": "Google Workspace Remote MCP",
                     "description": "Remote MCP server for Google Workspace integration with Claude",
                     "version": "1.0.0",
                     "endpoints": {
@@ -51,7 +51,7 @@ class handler(BaseHTTPRequestHandler):
                         "Gmail", "Calendar", "Drive", "Docs", "Sheets", 
                         "Slides", "Forms", "Chat", "Tasks", "Search"
                     ],
-                    "debug": "dcr_implementation_active"
+                    "debug": "dcr_implementation_deployed"
                 }
                 
                 manifest_json = json.dumps(manifest)
