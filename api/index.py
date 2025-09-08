@@ -41,7 +41,7 @@ class handler(BaseHTTPRequestHandler):
                         "connect": f"{base_url}/connect",
                         "configure": f"{base_url}/configure"
                     },
-                    "transport": ["sse", "http"],
+                    "transport": ["http"],
                     "oauth": True,
                     "sse": True,
                     "icon_url": f"{base_url}/static/icon.png",
