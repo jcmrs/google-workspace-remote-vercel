@@ -2,41 +2,6 @@ from http.server import BaseHTTPRequestHandler
 import json
 import os
 import urllib.parse
-import uuid
-import time
-
-# In-memory client storage for Dynamic Client Registration
-# Note: In production, this would be a persistent database
-REGISTERED_CLIENTS = {}
-
-def generate_client_id():
-    """Generate a unique client ID for Dynamic Client Registration"""
-    return f"dcr_{uuid.uuid4().hex[:16]}"
-
-def register_client(client_metadata):
-    """Register a new OAuth client dynamically per RFC 7591"""
-    client_id = generate_client_id()
-    
-    # Basic client registration data
-    client_data = {
-        "client_id": client_id,
-        "client_id_issued_at": int(time.time()),
-        "client_name": client_metadata.get("client_name", "MCP Client"),
-        "redirect_uris": client_metadata.get("redirect_uris", []),
-        "grant_types": client_metadata.get("grant_types", ["authorization_code"]),
-        "response_types": client_metadata.get("response_types", ["code"]),
-        "scope": client_metadata.get("scope", "mcp_access"),
-        "token_endpoint_auth_method": "none"  # Public client, no secret required
-    }
-    
-    # Store the registered client
-    REGISTERED_CLIENTS[client_id] = client_data
-    
-    return client_data
-
-def validate_client(client_id):
-    """Validate that a client_id was dynamically registered"""
-    return client_id in REGISTERED_CLIENTS
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -125,11 +90,9 @@ class handler(BaseHTTPRequestHandler):
                     ],
                     "tools_count": 10,
                     "authentication_type": "oauth2",
-                    "redirect_uri": "https://google-workspace-remote-vercel.vercel.app/oauth2callback",
-                    "dcr_enabled": True,
-                    "registered_clients": len(REGISTERED_CLIENTS)
+                    "redirect_uri": "https://google-workspace-remote-vercel.vercel.app/oauth2callback"
                 },
-                "message": "Google Workspace MCP ready for authentication with Dynamic Client Registration"
+                "message": "Google Workspace MCP ready for authentication"
             }
             
             self.wfile.write(json.dumps(config_response).encode())
@@ -200,7 +163,7 @@ class handler(BaseHTTPRequestHandler):
             <body>
                 <h1>OAuth Authorization</h1>
                 <p>This endpoint is available. Use /connect for Claude Desktop integration.</p>
-                <p>Server ready for OAuth implementation with Dynamic Client Registration</p>
+                <p>Server ready for OAuth implementation</p>
             </body>
             </html>
             '''
@@ -208,25 +171,20 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(html_response.encode())
             return
         
-        # OAuth Authorization Server metadata endpoint - UPDATED FOR DCR
+        # OAuth Authorization Server metadata endpoint
         if path == '/.well-known/oauth-authorization-server':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
             
-            base_url = "https://google-workspace-remote-vercel.vercel.app"
             response = {
-                "issuer": base_url,
-                "authorization_endpoint": f"{base_url}/authorize",
-                "token_endpoint": f"{base_url}/token",
-                "registration_endpoint": f"{base_url}/register",  # DCR endpoint
+                "issuer": "https://google-workspace-remote-vercel.vercel.app",
+                "authorization_endpoint": "https://google-workspace-remote-vercel.vercel.app/connect",
+                "token_endpoint": "https://google-workspace-remote-vercel.vercel.app/token",
                 "response_types_supported": ["code"],
                 "grant_types_supported": ["authorization_code"],
-                "code_challenge_methods_supported": ["S256"],
-                "scopes_supported": ["mcp_access", "email", "calendar", "drive"],
-                "token_endpoint_auth_methods_supported": ["none"],  # Public clients
-                "registration_endpoint_auth_methods_supported": ["none"]  # Anonymous registration
+                "code_challenge_methods_supported": ["S256"]
             }
             
             self.wfile.write(json.dumps(response).encode())
@@ -242,9 +200,7 @@ class handler(BaseHTTPRequestHandler):
             response = {
                 "authorization_servers": [
                     "https://google-workspace-remote-vercel.vercel.app"
-                ],
-                "scopes_supported": ["mcp_access"],
-                "bearer_methods_supported": ["header"]
+                ]
             }
             
             self.wfile.write(json.dumps(response).encode())
@@ -274,26 +230,21 @@ class handler(BaseHTTPRequestHandler):
         response = {
             "service": "Google Workspace MCP Server",
             "version": "1.0.0", 
-            "status": "dcr_ready",
+            "status": "connector_ready",
             "protocol": "MCP",
             "endpoints": {
                 "manifest": "/.well-known/anthropic-connector-manifest",
                 "connect": "/connect",
                 "configure": "/configure",
                 "sse": "/sse",
-                "oauth_callback": "/oauth2callback",
-                "register": "/register"
+                "oauth_callback": "/oauth2callback"
             },
             "transports": ["POST", "SSE"],
             "features": [
                 "Gmail", "Calendar", "Drive", "Docs", "Sheets", 
                 "Slides", "Forms", "Chat", "Tasks", "Search"
             ],
-            "oauth": {
-                "dynamic_client_registration": True,
-                "registered_clients": len(REGISTERED_CLIENTS)
-            },
-            "message": "Claude Desktop Connector ready - Dynamic Client Registration enabled"
+            "message": "Claude Desktop Connector ready - OAuth configuration fixed"
         }
         
         self.wfile.write(json.dumps(response).encode())
@@ -304,108 +255,20 @@ class handler(BaseHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         
-        # Dynamic Client Registration endpoint - RFC 7591
-        if path == '/register':
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                client_metadata = json.loads(post_data)
-                
-                # Register the client
-                client_data = register_client(client_metadata)
-                
-                # Return client registration response per RFC 7591
-                self.send_response(201)  # Created
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                registration_response = {
-                    "client_id": client_data["client_id"],
-                    "client_id_issued_at": client_data["client_id_issued_at"],
-                    "client_name": client_data["client_name"],
-                    "redirect_uris": client_data["redirect_uris"],
-                    "grant_types": client_data["grant_types"],
-                    "response_types": client_data["response_types"],
-                    "scope": client_data["scope"],
-                    "token_endpoint_auth_method": client_data["token_endpoint_auth_method"]
-                }
-                
-                self.wfile.write(json.dumps(registration_response).encode())
-                return
-                
-            except Exception as e:
-                # Registration error
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                error_response = {
-                    "error": "invalid_client_metadata",
-                    "error_description": f"Client registration failed: {str(e)}"
-                }
-                
-                self.wfile.write(json.dumps(error_response).encode())
-                return
-        
-        # OAuth token endpoint - UPDATED FOR DCR
+        # OAuth token endpoint
         if path == '/token':
-            try:
-                content_length = int(self.headers.get('Content-Length', 0))
-                post_data = self.rfile.read(content_length).decode('utf-8')
-                token_request = urllib.parse.parse_qs(post_data)
-                
-                # Extract client_id from the request
-                client_id = token_request.get('client_id', [None])[0]
-                grant_type = token_request.get('grant_type', [None])[0]
-                
-                # Validate the dynamically registered client
-                if client_id and validate_client(client_id):
-                    # For now, return a placeholder response
-                    # In production, this would exchange auth code for access token
-                    self.send_response(200)
-                    self.send_header('Content-Type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    
-                    token_response = {
-                        "access_token": f"dcr_token_{uuid.uuid4().hex[:16]}",
-                        "token_type": "Bearer",
-                        "expires_in": 3600,
-                        "scope": "mcp_access"
-                    }
-                    
-                    self.wfile.write(json.dumps(token_response).encode())
-                    return
-                else:
-                    # Invalid client
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.send_header('Access-Control-Allow-Origin', '*')
-                    self.end_headers()
-                    
-                    error_response = {
-                        "error": "invalid_client",
-                        "error_description": "Client ID not found or not registered via DCR"
-                    }
-                    
-                    self.wfile.write(json.dumps(error_response).encode())
-                    return
-                    
-            except Exception as e:
-                self.send_response(400)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.end_headers()
-                
-                error_response = {
-                    "error": "invalid_request",
-                    "error_description": f"Token request failed: {str(e)}"
-                }
-                
-                self.wfile.write(json.dumps(error_response).encode())
-                return
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response = {
+                "error": "not_implemented",
+                "error_description": "Token endpoint exists but OAuth flow not yet implemented. Use /connect for Claude Desktop integration."
+            }
+            
+            self.wfile.write(json.dumps(response).encode())
+            return
         
         # Handle MCP protocol messages
         content_length = int(self.headers.get('Content-Length', 0))
