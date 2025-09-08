@@ -11,34 +11,46 @@ class handler(BaseHTTPRequestHandler):
         
         # Anthropic Connector Manifest - CRITICAL for Claude Desktop discovery
         if path == '/.well-known/anthropic-connector-manifest':
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            
-            base_url = "https://google-workspace-remote-vercel.vercel.app"
-            manifest = {
-                "name": "Google Workspace MCP",
-                "description": "Remote MCP server for Google Workspace integration with Claude",
-                "version": "1.0.0",
-                "endpoints": {
-                    "connect": f"{base_url}/connect",
-                    "configure": f"{base_url}/configure"
-                },
-                "transport": ["sse", "http"],
-                "oauth": true,
-                "sse": True,
-                "icon_url": f"{base_url}/static/icon.png",
-                "documentation_url": "https://github.com/jcmrs/google-workspace-remote-vercel",
-                "scopes": ["email", "calendar", "drive", "docs", "sheets", "slides", "forms", "chat", "tasks"],
-                "features": [
-                    "Gmail", "Calendar", "Drive", "Docs", "Sheets", 
-                    "Slides", "Forms", "Chat", "Tasks", "Search"
-                ]
-            }
-            
-            self.wfile.write(json.dumps(manifest).encode())
-            return
+            try:
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                
+                base_url = "https://google-workspace-remote-vercel.vercel.app"
+                manifest = {
+                    "name": "Google Workspace MCP",
+                    "description": "Remote MCP server for Google Workspace integration with Claude",
+                    "version": "1.0.0",
+                    "endpoints": {
+                        "connect": f"{base_url}/connect",
+                        "configure": f"{base_url}/configure"
+                    },
+                    "transport": ["sse", "http"],
+                    "oauth": True,
+                    "sse": True,
+                    "icon_url": f"{base_url}/static/icon.png",
+                    "documentation_url": "https://github.com/jcmrs/google-workspace-remote-vercel",
+                    "scopes": ["email", "calendar", "drive", "docs", "sheets", "slides", "forms", "chat", "tasks"],
+                    "features": [
+                        "Gmail", "Calendar", "Drive", "Docs", "Sheets", 
+                        "Slides", "Forms", "Chat", "Tasks", "Search"
+                    ],
+                    "debug": "manifest_working_with_error_handling"
+                }
+                
+                manifest_json = json.dumps(manifest)
+                self.wfile.write(manifest_json.encode())
+                return
+            except Exception as e:
+                # If manifest fails, return error info
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                error_response = {"error": str(e), "path": path, "debug": "manifest_exception"}
+                self.wfile.write(json.dumps(error_response).encode())
+                return
         
         # Connect endpoint - returns OAuth configuration for Claude Desktop internal flow
         if path == '/connect':
